@@ -1,0 +1,38 @@
+import requests
+import pandas as pd
+
+API_KEY = "TU_API_KEY"
+
+url = "https://api.datosabiertos.mef.gob.pe/DatosAbiertos/v1/datastore_search"
+
+headers = {
+    "Authorization": "8bfce6c4-0010-42bd-bcd1-d6f91e8e0b2e"
+}
+
+params = {
+    "resource_id": "615644aa-ef73-4358-b4e0-0c20931632f3",
+    "limit": 100
+}
+
+response = requests.get(
+    url,
+    headers=headers,
+    params=params,
+    timeout=30
+)
+response.raise_for_status()
+
+payload = response.json()
+result = payload.get("result", {})
+records = result.get("records") if isinstance(result, dict) else None
+
+if records is None:
+    records = payload.get("records", [])
+
+if not records:
+    print("No records found in the API response.")
+else:
+    df = pd.DataFrame(records)
+    print("DataFrame creado:")
+    print(df.iloc[:, :10])
+    print("\nForma del DataFrame:", df.shape)

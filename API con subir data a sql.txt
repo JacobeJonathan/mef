@@ -1,0 +1,113 @@
+import requests
+import pandas as pd
+import pyodbc
+import re
+
+API_KEY = "TU_API_KEY"
+
+url = "https://api.datosabiertos.mef.gob.pe/DatosAbiertos/v1/datastore_search"
+
+headers = {
+    "Authorization": "8bfce6c4-0010-42bd-bcd1-d6f91e8e0b2e"
+}
+
+params = {
+    "resource_id": "615644aa-ef73-4358-b4e0-0c20931632f3",
+    "limit": 100
+}
+
+response = requests.get(
+    url,
+    headers=headers,
+    params=params,
+    timeout=30
+)
+response.raise_for_status()
+
+payload = response.json()
+result = payload.get("result", {})
+records = result.get("records") if isinstance(result, dict) else None
+
+if records is None:
+    records = payload.get("records", [])
+
+if not records:
+    print("No records found in the API response.")
+else:
+    df = pd.DataFrame(records)
+    print("DataFrame creado:")
+    print(df.head(10))
+    print("\nForma del DataFrame:", df.shape)
+
+    server = "MIMP_4515"
+    database = "GastoPublico"
+    username = ""
+    password = ""
+
+    if username and password:
+        master_conn_str = (
+            f"DRIVER={{SQL Server}};"
+            f"SERVER={server};"
+            f"DATABASE=master;"
+            f"UID={username};"
+            f"PWD={password};"
+            f"Connection Timeout=30;"
+        )
+    else:
+        master_conn_str = (
+            f"DRIVER={{SQL Server}};"
+            f"SERVER={server};"
+            f"DATABASE=master;"
+            f"Trusted_Connection=yes;"
+            f"Connection Timeout=30;"
+        )
+
+    conn = pyodbc.connect(master_conn_str)
+    cursor = conn.cursor()
+    cursor.execute(f"IF DB_ID('{database}') IS NULL CREATE DATABASE {database}")
+    cursor.execute(f"USE {database}")
+
+    table_name = "mef_data"
+    cursor.execute(f"IF OBJECT_ID('{table_name}', 'U') IS NOT NULL DROP TABLE {table_name}")
+
+    api_columns = [
+        "ANO_EJE", "MES_EJE", "NIVEL_GOBIERNO", "NIVEL_GOBIERNO_NOMBRE", "SECTOR", "SECTOR_NOMBRE",
+        "PLIEGO", "PLIEGO_NOMBRE", "SEC_EJEC", "EJECUTORA", "EJECUTORA_NOMBRE",
+        "DEPARTAMENTO_EJECUTORA", "DEPARTAMENTO_EJECUTORA_NOMBRE", "PROVINCIA_EJECUTORA",
+        "PROVINCIA_EJECUTORA_NOMBRE", "DISTRITO_EJECUTORA", "DISTRITO_EJECUTORA_NOMBRE",
+        "SEC_FUNC", "PROGRAMA_PPTO", "PROGRAMA_PPTO_NOMBRE", "TIPO_ACT_PROY",
+        "TIPO_ACT_PROY_NOMBRE", "PRODUCTO_PROYECTO", "PRODUCTO_PROYECTO_NOMBRE",
+        "ACTIVIDAD_ACCION_OBRA", "ACTIVIDAD_ACCION_OBRA_NOMBRE", "FUNCION", "FUNCION_NOMBRE",
+        "DIVISION_FUNCIONAL", "DIVISION_FUNCIONAL_NOMBRE", "GRUPO_FUNCIONAL",
+        "GRUPO_FUNCIONAL_NOMBRE", "META", "FINALIDAD", "META_NOMBRE",
+        "DEPARTAMENTO_META", "DEPARTAMENTO_META_NOMBRE", "FUENTE_FINANCIAMIENTO",
+        "FUENTE_FINANCIAMIENTO_NOMBRE", "RUBRO", "RUBRO_NOMBRE", "TIPO_RECURSO",
+        "TIPO_RECURSO_NOMBRE", "CATEGORIA_GASTO", "CATEGORIA_GASTO_NOMBRE",
+        "TIPO_TRANSACCION", "GENERICA", "GENERICA_NOMBRE", "SUBGENERICA",
+        "SUBGENERICA_NOMBRE", "SUBGENERICA_DET", "SUBGENERICA_DET_NOMBRE",
+        "ESPECIFICA", "ESPECIFICA_NOMBRE", "ESPECIFICA_DET", "ESPECIFICA_DET_NOMBRE",
+        "MONTO_PIA", "MONTO_PIM", "MONTO_CERTIFICADO", "MONTO_COMPROMETIDO_ANUAL",
+        "MONTO_COMPROMETIDO", "MONTO_DEVENGADO", "MONTO_GIRADO"
+    ]
+
+    columns_sql = [f"[{col}] NVARCHAR(MAX)" for col in api_columns]
+    create_sql = f"CREATE TABLE {table_name} ({', '.join(columns_sql)})"
+    cursor.execute(create_sql)
+
+    insert_columns = ", ".join([f"[{col}]" for col in api_columns])
+    placeholders = ", ".join(["?" for _ in api_columns])
+    insert_sql = f"INSERT INTO {table_name} ({insert_columns}) VALUES ({placeholders})"
+
+    for _, row in df.iterrows():
+        values = []
+        for col in api_columns:
+            value = row.get(col, None) if col in row else None
+            if pd.isna(value):
+                value = None
+            values.append(value)
+        cursor.execute(insert_sql, values)
+
+    conn.commit()
+    conn.close()
+
+    print(f"\nDatos guardados en SQL Server en la tabla '{table_name}' de la base de datos '{database}'")
